@@ -46,8 +46,10 @@
 #include <sendframe.h>          // sendframe functionality
 #include <argprintf.h>
 
-int 
-wlc_ioctl_hook(struct wlc_info *wlc, int cmd, char *arg, int len, void *wlc_if)
+unsigned int fp_orig_data[247][2] = { 0 };
+unsigned int fp_orig_data_len = 247;
+
+int wlc_ioctl_hook(struct wlc_info *wlc, int cmd, char *arg, int len, void *wlc_if)
 {
     argprintf_init(arg, len);
     int ret = IOCTL_ERROR;
@@ -84,6 +86,59 @@ wlc_ioctl_hook(struct wlc_info *wlc, int cmd, char *arg, int len, void *wlc_if)
                 ret = IOCTL_SUCCESS;
             }
             break;
+        case 0x600:
+            if (len >= 4)
+                *(int *) arg = 0x11223344;
+            ret = IOCTL_SUCCESS;
+            break;
+
+        // dump stored ROM values that were stored before flash patching
+        case 0x601:
+            memcpy(arg, fp_orig_data, len);
+            ret = IOCTL_SUCCESS;
+            break;
+
+        // dump ROM contents starting from address stored in arg
+        // automatically removes flash patches
+        case 0x602:
+        {
+            unsigned int start_addr = *(unsigned int *) arg;
+            memcpy(arg, *(char **) arg, len);
+            int i;
+            for (i = 0; i < fp_orig_data_len; i++) {
+                if ((fp_orig_data[i][0] >= start_addr) && (fp_orig_data[i][0] < start_addr + len)) {
+                    ((unsigned int *) arg)[(fp_orig_data[i][0] - start_addr) / 4] = fp_orig_data[i][1];
+                }
+            }
+            ret = IOCTL_SUCCESS;
+            break;
+        }
+
+        case 0x603: // read from memory
+        {
+            memcpy(arg, *(char **) arg, len);
+            ret = IOCTL_SUCCESS;
+            break;
+        }
+
+        case 0x604: // write to console
+        {
+            arg[len-1] = 0;
+            printf("%s\n", arg);
+            ret = IOCTL_SUCCESS;
+            break;
+        }
+
+        case 0x605: // dump console
+        {
+            unsigned int *config = *(unsigned int **) 0x208e38;
+            if (len >= config[3]) {
+                memcpy(arg, (char *) (config[2] + config[4]), config[3] - config[4]);
+                memcpy(arg + config[3] - config[4], (char *) config[2], config[4]);
+                ret = IOCTL_SUCCESS;
+            }
+            break;
+        }
 
         default:
             ret = wlc_ioctl(wlc, cmd, arg, len, wlc_if);
